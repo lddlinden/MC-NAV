@@ -93,11 +93,26 @@ const authenticate = (req, res, next) => {
   } catch { res.status(401).json({ error: 'Ogiltig token' }); }
 };
 
-// In-memory state för att spåra aktiva händelser per enhet och undvika dubbla aviseringar
-const deviceEventStates = {}; // Format: { 'topic': { crash: 0, towing: 0 } }
+// In-memory state för att spåra aktiva händelser per enhet
+const deviceEventStates = {}; // Format: { 'topic': { crash: { status: 'idle', timer: null, startTime: null }, towing: { status: 'idle', timer: null, startTime: null, startPos: null } } }
 const pendingCommandResponses = new Map();
 const COMMAND_TOPIC = process.env.MQTT_COMMAND_TOPIC || 'teltonika/fmc880/commands';
 const COMMAND_RESPONSE_TIMEOUT_MS = parseInt(process.env.COMMAND_RESPONSE_TIMEOUT_MS, 10) || 10000;
+const ALERT_DELAY_MS = 3 * 60 * 1000; // 3 minuter
+
+const clearAlertState = (topic, type) => {
+    if (deviceEventStates[topic] && deviceEventStates[topic][type]) {
+        if (deviceEventStates[topic][type].timer) clearTimeout(deviceEventStates[topic][type].timer);
+        deviceEventStates[topic][type] = { status: 'idle', timer: null, startTime: null, startPos: null };
+    }
+};
+
+const triggerAlert = async (eventType, topic, reportedData, fullPayload) => {
+    console.log(`[Alert] Triggering ${eventType} for ${topic}`);
+    const responseUrl = await requestGgpsUrl();
+    await sendNotification(eventType, topic, reportedData, fullPayload, responseUrl);
+    clearAlertState(topic, eventType);
+};
 
 const createCorrelationId = () => {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -298,34 +313,72 @@ mqttClient.on('message', async (topic, message) => {
     }
 
     // --- Händelsedetektering för aviseringar ---
-    // FMC880/FMBXXX: Towing (246) and Crash Detection (247).
-    // Crash: 1-6 are valid crash events (7-8 are fake/potholes).
     const crashDetected = (reported['247'] >= 1 && reported['247'] <= 6);
     const towingDetected = (reported['246'] === 1);
+    const ignitionOn = (reported['239'] === 1);
+    const speed = reported['sp'] || 0;
 
     // Initiera tillstånd för denna topic om det inte finns
     if (!deviceEventStates[topic]) {
-      deviceEventStates[topic] = { crash: 0, towing: 0 };
+      deviceEventStates[topic] = { 
+        crash: { status: 'idle', timer: null, startTime: null }, 
+        towing: { status: 'idle', timer: null, startTime: null, startPos: null } 
+      };
     }
 
-    // Kontrollera Crash Detection (evt 247)
-    if (crashDetected && deviceEventStates[topic].crash !== 1) {
-      console.log(`[Event] Crash Detected för ${topic}!`);
-      const responseUrl = await requestGgpsUrl();
-      await sendNotification('crash', topic, reported, data, responseUrl);
-      deviceEventStates[topic].crash = 1; // Uppdatera tillstånd
-    } else if (!crashDetected && deviceEventStates[topic].crash === 1) {
-      deviceEventStates[topic].crash = 0; // Återställ tillstånd när händelsen upphör
+    // CRASH LOGIK
+    const crashState = deviceEventStates[topic].crash;
+    if (crashDetected && crashState.status === 'idle') {
+      console.log(`[Event] Potentiell crash detekterad för ${topic}, startar timer.`);
+      crashState.status = 'pending';
+      crashState.startTime = Date.now();
+      crashState.timer = setTimeout(() => {
+        // Efter 3 min, kolla om vi fortfarande "crashar" (stilla eller dålig lutning)
+        // I denna enkla implementation utgår vi från att om den levererar "vanlig" data 
+        // (hastighet > 0) så är det inte en allvarlig krasch.
+        if (crashState.status === 'pending') {
+          triggerAlert('crash', topic, reported, data);
+        }
+      }, ALERT_DELAY_MS);
+    } else if (crashState.status === 'pending' && speed > 5) {
+      // Om den kör (> 5km/h), avbryt larm
+      console.log(`[Event] Crash avbruten - rörelse detekterad.`);
+      clearAlertState(topic, 'crash');
     }
 
-    // Kontrollera Towing Detection (ID 246)
-    if (towingDetected && deviceEventStates[topic].towing !== 1) {
-      console.log(`[Event] Towing Detected för ${topic}!`);
-      const responseUrl = await requestGgpsUrl();
-      await sendNotification('towing', topic, reported, data, responseUrl);
-      deviceEventStates[topic].towing = 1; // Uppdatera tillstånd
-    } else if (!towingDetected && deviceEventStates[topic].towing === 1) {
-      deviceEventStates[topic].towing = 0; // Återställ tillstånd när händelsen upphör
+    // TOWING LOGIK
+    const towingState = deviceEventStates[topic].towing;
+    if (towingDetected && towingState.status === 'idle') {
+      console.log(`[Event] Potentiell bogsering detekterad för ${topic}, startar timer.`);
+      towingState.status = 'pending';
+      towingState.startTime = Date.now();
+      towingState.startPos = { lat, lng };
+      towingState.timer = setTimeout(() => {
+        // Efter 3 min, kolla om tändning fortfarande är av
+        if (towingState.status === 'pending' && !ignitionOn) {
+          triggerAlert('towing', topic, reported, data);
+        }
+      }, ALERT_DELAY_MS);
+    } else if (towingState.status === 'pending') {
+      if (ignitionOn) {
+        console.log(`[Event] Bogsering avbruten - tändning på.`);
+        clearAlertState(topic, 'towing');
+      } else {
+        // Kontrollera om den flyttats mer än 100m
+        const R = 6371e3; // meter
+        const φ1 = towingState.startPos.lat * Math.PI/180;
+        const φ2 = lat * Math.PI/180;
+        const Δφ = (lat - towingState.startPos.lat) * Math.PI/180;
+        const Δλ = (lng - towingState.startPos.lng) * Math.PI/180;
+        const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ/2) * Math.sin(Δλ/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        const distance = R * c;
+
+        if (distance > 100) {
+            console.log(`[Event] Bogsering avstånd > 100m, triggar larm.`);
+            triggerAlert('towing', topic, reported, data);
+        }
+      }
     }
     // --- Slut på händelsedetektering ---
 

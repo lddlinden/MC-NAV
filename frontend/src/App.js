@@ -125,42 +125,43 @@ function App() {
       .catch(err => console.error('Failed to fetch stats:', err));
   }, [token]);
 
-  // Socket.io listener for realtime updates – FIX: Reconnect indefinitely and don't clear state
-  useEffect(() => {
-    const socket = io(window.location.origin, {
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      reconnectionAttempts: Infinity, // ← Försök oändligt många gånger
-      reconnectionDelayMax: 10000 // ← Öka max väntetid
-    });
+    // Socket.io listener for realtime updates
+    useEffect(() => {
+        let socket;
+        const connectSocket = () => {
+            socket = io(window.location.origin, {
+                reconnection: true,
+                reconnectionDelay: 1000,
+                reconnectionDelayMax: 10000,
+                reconnectionAttempts: Infinity,
+                auth: { token }
+            });
 
-    socket.on('connect', () => {
-      console.log('Socket.io connected');
-    });
+            socket.on('connect', () => {
+                console.log('Socket.io connected');
+            });
 
-    socket.on('connect_error', (error) => {
-      console.error('Socket.io connection error:', error);
-    });
+            socket.on('connect_error', (error) => {
+                console.error('Socket.io connection error:', error);
+            });
 
-    socket.on('disconnect', (reason) => {
-      console.log('Socket.io disconnected:', reason);
-      // Försök reconnecta
-      if (reason === 'io server disconnect') {
-        socket.connect();
-      }
-    });
+            socket.on('position-update', (newPos) => {
+                console.log('Position update received:', newPos);
+                setPositions(prev => [...prev, newPos]);
+                setSelectedPoint(newPos);
+            });
+        };
 
-    socket.on('position-update', (newPos) => {
-      console.log('Position update received:', newPos);
-      setPositions(prev => [...prev, newPos]);
-      setSelectedPoint(newPos);
-    });
+        if (token) {
+            connectSocket();
+        }
 
-    return () => {
-      socket.disconnect();
-    };
-  }, []);
+        return () => {
+            if (socket) {
+                socket.disconnect();
+            }
+        };
+    }, [token]);
 
   const polylineCoords = positions.map(p => [p.lat, p.lng]);
   const latestPos = positions.length > 0 ? [positions[positions.length - 1].lat, positions[positions.length - 1].lng] : [56.8, 14.8];
