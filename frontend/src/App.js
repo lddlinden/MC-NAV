@@ -28,7 +28,7 @@ function App() {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [startDate, setStartDate] = useState(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768);
   const [mapType, setMapType] = useState('osm');
 
   useEffect(() => {
@@ -75,11 +75,12 @@ function App() {
 
   useEffect(() => {
     if (!token) return;
-    fetch('/api/stats/distance?days=7', { headers: { Authorization: `Bearer ${token}` } })
+    const days = Math.max(1, Math.round((new Date(endDate) - new Date(startDate)) / (1000 * 60 * 60 * 24)));
+    fetch(`/api/stats/distance?days=${days}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
       .then(data => setStats(data || { total_distance: 0 }))
       .catch(err => console.error('Failed to fetch stats:', err));
-  }, [token]);
+  }, [token, startDate, endDate]);
 
   useEffect(() => {
     let socket;
@@ -128,105 +129,137 @@ function App() {
   const gsmSignal = getLatestData()?.['241'] || 0;
   const lastUpdate = selectedPoint?.ts ? new Date(selectedPoint.ts).toLocaleString('sv-SE') : 'Ingen data';
 
+  // Miniatyr-bilder för kartväljaren (simulerade med CSS/gradienter för demo, byt gärna till riktiga bilder)
+  const osmThumb = 'repeating-linear-gradient(45deg, #eee 0, #eee 2px, #fff 0, #fff 50%)';
+  const satThumb = 'linear-gradient(rgba(0,0,0,0.3), rgba(0,0,0,0.3)), url(https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/10/350/500)';
+
+  // Dynamisk beräkning av antal dagar för rubriken
+  const diffDays = Math.max(1, Math.round((new Date(endDate) - new Date(startDate)) / (1000 * 60 * 60 * 24)));
+
   return (
-    <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', height: '100vh', fontFamily: 'Inter, system-ui, sans-serif', backgroundColor: '#f4f4f9' }}>
-      {/* Header */}
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', fontFamily: 'Inter, system-ui, sans-serif', backgroundColor: '#f4f4f9', overflow: 'hidden' }}>
+      {/* Tunn Header */}
       <div style={{ 
-        background: '#0f3460', color: '#fff', padding: '10px 20px', 
+        background: '#0f3460', color: '#fff', padding: '0 15px', height: '50px', minHeight: '50px',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.2)'
+        boxShadow: '0 2px 10px rgba(0,0,0,0.2)', zIndex: 3000
       }}>
-        <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
-          {isMobile && (
-            <button onClick={() => setSidebarOpen(!sidebarOpen)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.5rem', cursor: 'pointer' }}>&#9776;</button>
-          )}
-          <h1 style={{ fontSize: isMobile ? '1rem' : '1.5rem', margin: 0 }}>MC Tracker</h1>
-        </div>
-        <div style={{ display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: isMobile ? '0.7rem' : '0.8rem', color: '#94a3b8' }}>DISTANS (7 DAGAR)</div>
-            <div style={{ fontSize: isMobile ? '1rem' : '1.2rem', fontWeight: 'bold' }}>{(stats.total_distance / 1000).toFixed(2)} km</div>
-          </div>
-          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ padding: '5px', borderRadius: '4px', border: 'none' }} />
-          <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={{ padding: '5px', borderRadius: '4px', border: 'none' }} />
-        </div>
-      </div>
-
-      {/* Sidebar */}
-      <div style={{ 
-        width: isMobile ? (sidebarOpen ? '100%' : '0') : '320px',
-        height: isMobile ? 'auto' : 'calc(100vh - 60px)',
-        background: '#1a1a2e', color: '#fff', padding: '15px',
-        overflowY: 'auto', transition: 'width 0.3s ease',
-        boxSizing: 'border-box'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', paddingBottom: '10px', borderBottom: '1px solid #30304d' }}>
-          <h2 style={{ fontSize: '1.1rem', margin: 0 }}>Status</h2>
-          {isMobile && <button onClick={() => setSidebarOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>&times;</button>}
-        </div>
-
-        {/* Telemetri */}
-        <div style={{ marginBottom: '15px' }}>
-          <h3 style={{ fontSize: '0.9rem', color: '#94a3b8', marginTop: 0 }}>TELEMETRI</h3>
-          <div style={{ display: 'grid', gap: '10px' }}>
-            <div><strong>Batterispänning:</strong> {batteryVoltage} V</div>
-            <div><strong>Internt batteri:</strong> {internalBattery} V</div>
-            <div><strong>Tändning:</strong> {formatValue('239', ignition)}</div>
-            <div><strong>Hastighet:</strong> {speed} km/h</div>
-            <div><strong>Höjd:</strong> {altitude} m</div>
-            <div><strong>Satelliter:</strong> {satellites}</div>
-            <div><strong>GSM Signal:</strong> {'&#9642;'.repeat(gsmSignal)}</div>
-            <div style={{ marginTop: '10px', color: '#4cc9f0' }}>Senaste data: {lastUpdate}</div>
-          </div>
-        </div>
-
-        {/* Lösenordsbyte */}
-        <div style={{ marginBottom: '15px', paddingBottom: '10px', borderBottom: '1px solid #30304d' }}>
-          <button onClick={() => setShowPasswordChange(!showPasswordChange)} style={{ background: 'none', border: '1px solid #30304d', color: '#94a3b8', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}>
-            &#9881; {showPasswordChange ? 'Avbryt lösenordsbyte' : 'Byt lösenord'}
+        <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
+          <button onClick={() => setSidebarOpen(!sidebarOpen)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.8rem', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0 }}>
+            {sidebarOpen ? '✕' : '☰'}
           </button>
-          {showPasswordChange && (
-            <form onSubmit={handlePasswordUpdate} style={{ marginTop: '10px', display: 'flex', gap: '5px' }}>
-              <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Nytt lösenord" style={{ padding: '5px', borderRadius: '4px', border: 'none', flexGrow: 1 }} required />
-              <button type="submit" style={{ background: '#4cc9f0', border: 'none', borderRadius: '4px', cursor: 'pointer', padding: '5px 10px' }}>Spara</button>
-            </form>
-          )}
-          {passwordStatus && <div style={{ fontSize: '0.7rem', marginTop: '5px', color: '#4cc9f0' }}>{passwordStatus}</div>}
+          {!isMobile && <h1 style={{ fontSize: '1.2rem', margin: 0 }}>MC Tracker</h1>}
         </div>
-
-        {/* Historikfilter */}
-        <div style={{ marginBottom: '15px' }}>
-          <h3 style={{ fontSize: '0.9rem', color: '#94a3b8', marginTop: 0 }}>FILTRERA HISTORIK</h3>
-          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ width: '100%', padding: '5px', borderRadius: '4px', border: 'none', marginBottom: '5px' }} />
-          <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={{ width: '100%', padding: '5px', borderRadius: '4px', border: 'none' }} />
+        
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <div style={{ textAlign: 'right', marginRight: '5px' }}>
+            <div style={{ fontSize: '0.65rem', color: '#94a3b8', lineHeight: 1 }}>{diffDays} DAGAR</div>
+            <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{(stats.total_distance / 1000).toFixed(1)} km</div>
+          </div>
+          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ padding: '4px', borderRadius: '4px', border: 'none', fontSize: '0.8rem', width: isMobile ? '100px' : 'auto' }} />
+          <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={{ padding: '4px', borderRadius: '4px', border: 'none', fontSize: '0.8rem', width: isMobile ? '100px' : 'auto' }} />
         </div>
-
-        {/* Logout */}
-        <button onClick={handleLogout} style={{ width: '100%', background: '#e63946', color: '#fff', border: 'none', padding: '8px', borderRadius: '6px', cursor: 'pointer' }}>Logga ut</button>
       </div>
 
-      {/* Kartvy */}
-      <div style={{ flexGrow: 1, position: 'relative', height: isMobile ? 'auto' : 'calc(100vh - 60px)' }}>
-        <MapContainer center={latestPos} zoom={13} style={{ height: '100%', width: '100%' }}>
-          {mapType === 'osm' && (
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; OpenStreetMap' />
-          )}
-          {mapType === 'satellite' && (
-            <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" attribution='&copy; Esri' />
-          )}
-          <RecenterMap coords={latestPos} />
-          {polylineCoords.length > 0 && <Polyline positions={polylineCoords} color="#4cc9f0" weight={4} opacity={0.7} />}
-          {polylineCoords.length > 0 && (
-            <Marker position={latestPos}>
-              <Popup><strong>Senaste position</strong><br />{new Date(selectedPoint?.ts).toLocaleTimeString()}</Popup>
-            </Marker>
-          )}
-        </MapContainer>
+      <div style={{ position: 'relative', flexGrow: 1, display: 'flex', overflow: 'hidden' }}>
+        {/* Sidebar som Overlay */}
+        <div style={{ 
+          position: 'absolute',
+          top: 0,
+          left: sidebarOpen ? 0 : '-320px',
+          width: isMobile ? '100%' : '320px',
+          height: '100%',
+          background: '#1a1a2e', color: '#fff', padding: '20px',
+          overflowY: 'auto', transition: 'left 0.3s ease',
+          boxSizing: 'border-box',
+          zIndex: 2500,
+          boxShadow: sidebarOpen ? '5px 0 15px rgba(0,0,0,0.3)' : 'none'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', paddingBottom: '10px', borderBottom: '1px solid #30304d' }}>
+            <h2 style={{ fontSize: '1.1rem', margin: 0 }}>Enhetsstatus</h2>
+            {isMobile && <button onClick={() => setSidebarOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '1.5rem', cursor: 'pointer' }}>&times;</button>}
+          </div>
 
-        {/* Karttyp-växlare */}
-        <div style={{ position: 'absolute', top: '10px', right: '10px', display: 'flex', gap: '5px' }}>
-          <button onClick={() => setMapType('osm')} style={{ background: mapType === 'osm' ? '#0f3460' : 'rgba(255,255,255,0.7)', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}>OSM</button>
-          <button onClick={() => setMapType('satellite')} style={{ background: mapType === 'satellite' ? '#0f3460' : 'rgba(255,255,255,0.7)', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}>Satellit</button>
+          {/* Telemetri */}
+          <div style={{ marginBottom: '25px' }}>
+            <h3 style={{ fontSize: '0.8rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' }}>Live Telemetri</h3>
+            <div style={{ display: 'grid', gap: '12px', background: '#0f3460', padding: '15px', borderRadius: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Batteri</span><strong>{batteryVoltage} V</strong></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Backup</span><strong>{internalBattery} V</strong></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Tändning</span><strong>{formatValue('239', ignition)}</strong></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Hastighet</span><strong>{speed} km/h</strong></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Höjd</span><strong>{altitude} m</strong></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Satelliter</span><strong>{satellites}</strong></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Signal</span>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: '3px', height: '16px', marginBottom: '2px' }}>
+                  {[1, 2, 3].map((bar) => {
+                    // Mappar 0-5 signalstyrka till 3 steg
+                    // 1-2: 1 pelare, 3-4: 2 pelare, 5: 3 pelare
+                    const threshold = bar === 1 ? 1 : bar === 2 ? 3 : 5;
+                    const isActive = gsmSignal >= threshold;
+                    return (
+                      <div key={bar} style={{ width: '5px', height: `${(bar / 3) * 100}%`, backgroundColor: isActive ? '#4cc9f0' : '#30304d', borderRadius: '1px', transition: 'background-color 0.3s' }} />
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{ borderTop: '1px solid #30304d', paddingTop: '10px', marginTop: '5px', fontSize: '0.8rem', color: '#4cc9f0' }}>
+                Senaste fix: {lastUpdate}
+              </div>
+            </div>
+          </div>
+
+          {/* Inställningar & Logout */}
+          <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <button onClick={() => setShowPasswordChange(!showPasswordChange)} style={{ background: '#30304d', border: 'none', color: '#fff', padding: '10px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.9rem' }}>
+              {showPasswordChange ? 'Avbryt lösenord' : 'Inställningar'}
+            </button>
+            {showPasswordChange && (
+              <form onSubmit={handlePasswordUpdate} style={{ display: 'flex', gap: '5px', marginBottom: '10px' }}>
+                <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Nytt lösenord" style={{ padding: '8px', borderRadius: '4px', border: 'none', flexGrow: 1 }} required />
+                <button type="submit" style={{ background: '#4cc9f0', border: 'none', borderRadius: '4px', cursor: 'pointer', padding: '0 15px' }}>OK</button>
+              </form>
+            )}
+            <button onClick={handleLogout} style={{ background: '#e63946', color: '#fff', border: 'none', padding: '10px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Logga ut</button>
+          </div>
+        </div>
+
+        {/* Kartvy */}
+        <div style={{ flexGrow: 1, position: 'relative', zIndex: 1000 }}>
+          <MapContainer center={latestPos} zoom={13} style={{ height: '100%', width: '100%' }} zoomControl={!isMobile}>
+            {mapType === 'osm' && (
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; OSM' />
+            )}
+            {mapType === 'satellite' && (
+              <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" attribution='&copy; Esri' />
+            )}
+            <RecenterMap coords={latestPos} />
+            {polylineCoords.length > 0 && <Polyline positions={polylineCoords} color="#4cc9f0" weight={4} opacity={0.7} />}
+            {polylineCoords.length > 0 && (
+              <Marker position={latestPos}>
+                <Popup><strong>Nuvarande position</strong><br />{new Date(selectedPoint?.ts).toLocaleTimeString()}</Popup>
+              </Marker>
+            )}
+          </MapContainer>
+
+          {/* Karttyp-växlare (Miniatyrer) */}
+          <div 
+            onClick={() => setMapType(mapType === 'osm' ? 'satellite' : 'osm')}
+            style={{ 
+              position: 'absolute', top: '15px', right: '15px', zIndex: 1500,
+              width: '60px', height: '60px', borderRadius: '10px',
+              border: '2px solid white', boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
+              cursor: 'pointer', overflow: 'hidden',
+              background: mapType === 'osm' ? satThumb : osmThumb,
+              backgroundSize: 'cover', backgroundPosition: 'center',
+              display: 'flex', alignItems: 'flex-end'
+            }}
+          >
+            <div style={{ background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: '0.6rem', width: '100%', textAlign: 'center', padding: '2px 0' }}>
+              {mapType === 'osm' ? 'Satellit' : 'Karta'}
+            </div>
+          </div>
         </div>
       </div>
     </div>
