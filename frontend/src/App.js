@@ -221,7 +221,7 @@ function App() {
           {/* Inställningar & Logout */}
           <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <button onClick={() => setShowPasswordChange(!showPasswordChange)} style={{ background: '#30304d', border: 'none', color: '#fff', padding: '10px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.9rem' }}>
-              {showPasswordChange ? 'Avbryt lösenord' : 'Inställningar'}
+              {showPasswordChange ? 'Avbryt lösenord' : 'Byt lösenord'}
             </button>
             {showPasswordChange && (
               <form onSubmit={handlePasswordUpdate} style={{ display: 'flex', gap: '5px', marginBottom: '10px' }}>
