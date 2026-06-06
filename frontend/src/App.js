@@ -129,35 +129,42 @@ function App() {
   const gsmSignal = getLatestData()?.['241'] || 0;
   const lastUpdate = selectedPoint?.ts ? new Date(selectedPoint.ts).toLocaleString('sv-SE') : 'Ingen data';
 
-  // Miniatyr-bilder för kartväljaren (simulerade med CSS/gradienter för demo, byt gärna till riktiga bilder)
-  const osmThumb = 'repeating-linear-gradient(45deg, #eee 0, #eee 2px, #fff 0, #fff 50%)';
-  const satThumb = 'linear-gradient(rgba(0,0,0,0.3), rgba(0,0,0,0.3)), url(https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/10/350/500)';
+  // Riktiga miniatyr-bilder för kartväljaren
+  const osmThumb = 'url(https://a.tile.openstreetmap.org/12/2196/1347.png)';
+  const satThumb = 'url(https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/12/1347/2196)';
 
   // Dynamisk beräkning av antal dagar för rubriken
   const diffDays = Math.max(1, Math.round((new Date(endDate) - new Date(startDate)) / (1000 * 60 * 60 * 24)));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', fontFamily: 'Inter, system-ui, sans-serif', backgroundColor: '#f4f4f9', overflow: 'hidden' }}>
-      {/* Tunn Header */}
+      {/* Header med Info & Hastighet */}
       <div style={{ 
-        background: '#0f3460', color: '#fff', padding: '0 15px', height: '50px', minHeight: '50px',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        background: '#0f3460', color: '#fff', padding: '10px 15px', minHeight: '70px',
+        display: 'flex', flexDirection: 'column', justifyContent: 'center',
         boxShadow: '0 2px 10px rgba(0,0,0,0.2)', zIndex: 3000
       }}>
-        <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
-          <button onClick={() => setSidebarOpen(!sidebarOpen)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.8rem', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0 }}>
-            {sidebarOpen ? '✕' : '☰'}
-          </button>
-          {!isMobile && <h1 style={{ fontSize: '1.2rem', margin: 0 }}>MC Tracker</h1>}
-        </div>
-        
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <div style={{ textAlign: 'right', marginRight: '5px' }}>
-            <div style={{ fontSize: '0.65rem', color: '#94a3b8', lineHeight: 1 }}>{diffDays} DAGAR</div>
-            <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{(stats.total_distance / 1000).toFixed(1)} km</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+          <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
+            <button onClick={() => setSidebarOpen(!sidebarOpen)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.8rem', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0 }}>
+              {sidebarOpen ? '✕' : '☰'}
+            </button>
+            <h1 style={{ fontSize: '1.1rem', margin: 0, fontWeight: '700' }}>MC Tracker</h1>
           </div>
-          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ padding: '4px', borderRadius: '4px', border: 'none', fontSize: '0.8rem', width: isMobile ? '100px' : 'auto' }} />
-          <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={{ padding: '4px', borderRadius: '4px', border: 'none', fontSize: '0.8rem', width: isMobile ? '100px' : 'auto' }} />
+          
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ padding: '4px', borderRadius: '4px', border: 'none', fontSize: '0.75rem', width: '105px' }} />
+            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={{ padding: '4px', borderRadius: '4px', border: 'none', fontSize: '0.75rem', width: '105px' }} />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '5px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '5px' }}>
+          <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
+            <strong style={{ color: '#fff' }}>{(stats.total_distance / 1000).toFixed(1)} km</strong> kört senaste {diffDays} dagar
+          </div>
+          <div style={{ fontSize: '0.9rem', fontWeight: 'bold', color: '#4cc9f0' }}>
+            {speed} <span style={{ fontSize: '0.7rem' }}>km/h</span>
+          </div>
         </div>
       </div>
 
@@ -166,14 +173,15 @@ function App() {
         <div style={{ 
           position: 'absolute',
           top: 0,
-          left: sidebarOpen ? 0 : '-320px',
+          left: sidebarOpen ? 0 : '-350px',
           width: isMobile ? '100%' : '320px',
           height: '100%',
           background: '#1a1a2e', color: '#fff', padding: '20px',
           overflowY: 'auto', transition: 'left 0.3s ease',
           boxSizing: 'border-box',
           zIndex: 2500,
-          boxShadow: sidebarOpen ? '5px 0 15px rgba(0,0,0,0.3)' : 'none'
+          boxShadow: sidebarOpen ? '10px 0 25px rgba(0,0,0,0.5)' : 'none',
+          visibility: sidebarOpen ? 'visible' : 'hidden'
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', paddingBottom: '10px', borderBottom: '1px solid #30304d' }}>
             <h2 style={{ fontSize: '1.1rem', margin: 0 }}>Enhetsstatus</h2>
