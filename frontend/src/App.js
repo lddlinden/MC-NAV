@@ -55,10 +55,21 @@ function App() {
     if (data.token) { localStorage.setItem('mc_token', data.token); setToken(data.token); } else { alert('Fel inloggning'); }
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem('mc_token');
+    setToken(null);
+    setPositions([]);
+  };
+
   const handlePasswordUpdate = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/update-password', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ newPassword }) });
+      const res = await fetch('/api/update-password', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
+        body: JSON.stringify({ newPassword }) 
+      });
+      if (res.status === 401) { handleLogout(); return; }
       const data = await res.json();
       setPasswordStatus(data.message || data.error);
       if (res.ok) { setNewPassword(''); setTimeout(() => setShowPasswordChange(false), 2000); }
@@ -68,7 +79,11 @@ function App() {
   useEffect(() => {
     if (!token) return;
     fetch(`/api/history?start=${startDate}&end=${endDate}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+      .then(res => { 
+        if (res.status === 401) { handleLogout(); throw new Error("Session utgången"); }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`); 
+        return res.json(); 
+      })
       .then(data => { if (Array.isArray(data)) { setPositions(data); if (data.length > 0) setSelectedPoint(data[data.length - 1]); } else { console.error('History data is not an array:', data); setPositions([]); } })
       .catch(err => console.error('Failed to fetch history:', err));
   }, [token, startDate, endDate]);
@@ -77,7 +92,11 @@ function App() {
     if (!token) return;
     const days = Math.max(1, Math.round((new Date(endDate) - new Date(startDate)) / (1000 * 60 * 60 * 24)));
     fetch(`/api/stats/distance?days=${days}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+      .then(res => { 
+        if (res.status === 401) { handleLogout(); throw new Error("Session utgången"); }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`); 
+        return res.json(); 
+      })
       .then(data => setStats(data || { total_distance: 0 }))
       .catch(err => console.error('Failed to fetch stats:', err));
   }, [token, startDate, endDate]);
@@ -96,7 +115,6 @@ function App() {
 
   const polylineCoords = positions.map(p => [p.lat, p.lng]);
   const latestPos = positions.length > 0 ? [positions[positions.length - 1].lat, positions[positions.length - 1].lng] : [56.8, 14.8];
-  const handleLogout = () => { localStorage.removeItem('mc_token'); setToken(null); };
 
   if (!token) {
     return (

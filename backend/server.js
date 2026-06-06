@@ -463,7 +463,7 @@ app.post('/api/login', loginLimiter, async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password_hash);
 
     if (isMatch) {
-      const token = jwt.sign({ user: user.username, id: user.id }, JWT_SECRET, { expiresIn: '24h' });
+      const token = jwt.sign({ user: user.username, id: user.id }, JWT_SECRET, { expiresIn: '30d' });
       return res.json({ token });
     }
     res.status(401).json({ error: 'Fel användarnamn eller lösenord' });
