@@ -346,38 +346,78 @@ mqttClient.on('message', async (topic, message) => {
       clearAlertState(topic, 'crash');
     }
 
-    // TOWING LOGIK
+    // TOWING LOGIK - Förbättrad felhantering med batterispänning och hastighet
     const towingState = deviceEventStates[topic].towing;
+    
+    // Analysera tändningsstatus baserat på batterispänning (param 66)
+    const batteryVoltage = reported['66'] ? reported['66'] / 1000 : 0; // Omvandla till Volt
+    let ignitionStatus = 'unknown';
+    
+    if (speed > 5) {
+      ignitionStatus = 'running'; // Motor igång och i rörelse
+    } else if (batteryVoltage >= 13.0 && !ignitionOn) {
+      ignitionStatus = 'key_on_engine_off'; // Tändning på, motor avstängd (~13V+)
+    } else if (batteryVoltage < 12.5 && !ignitionOn) {
+      ignitionStatus = 'locked_armed'; // Låst och larmad (<12.5V)
+    } else if (!ignitionOn) {
+      ignitionStatus = 'key_off_stable'; // Nyckel ur, stabil spänning (~12.5-12.8V)
+    }
+
     if (towingDetected && towingState.status === 'idle') {
       console.log(`[Event] Potentiell bogsering detekterad för ${topic}, startar timer.`);
+      console.log(`[Towing] Batterispänning: ${batteryVoltage.toFixed(2)}V, Tändning: ${ignitionOn ? 'PÅ' : 'AV'}, Hastighet: ${speed}km/h`);
+      console.log(`[Towing] Analyserad status: ${ignitionStatus}`);
+      
       towingState.status = 'pending';
       towingState.startTime = Date.now();
       towingState.startPos = { lat, lng };
+      towingState.batteryVoltageAtStart = batteryVoltage;
+      towingState.ignitionStatusAtStart = ignitionStatus;
       towingState.timer = setTimeout(() => {
-        // Efter 3 min, kolla om tändning fortfarande är av
-        if (towingState.status === 'pending' && !ignitionOn) {
-          triggerAlert('towing', topic, reported, data);
+        // Efter 3 min: Krav - tändning AV OG hastighet < 5km/h OG flyttat >100m
+        if (towingState.status === 'pending' && !ignitionOn && speed < 5) {
+          const R = 6371e3; // meter
+          const φ1 = towingState.startPos.lat * Math.PI/180;
+          const φ2 = lat * Math.PI/180;
+          const Δφ = (lat - towingState.startPos.lat) * Math.PI/180;
+          const Δλ = (lng - towingState.startPos.lng) * Math.PI/180;
+          const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ/2) * Math.sin(Δλ/2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+          const distance = R * c;
+
+          if (distance > 100) {
+            console.log(`[Event] Bogsering bekräftad - tändning AV, hastighet <5km/h, flyttat ${Math.round(distance)}m`);
+            triggerAlert('towing', topic, reported, data);
+          } else {
+            console.log(`[Towing] Avbruten - endast ${Math.round(distance)}m rörelse`);
+            clearAlertState(topic, 'towing');
+          }
+        } else if (towingState.status === 'pending' && ignitionOn) {
+          console.log(`[Event] Bogsering avbruten - tändning på under väntetiden`);
+          clearAlertState(topic, 'towing');
+        } else if (towingState.status === 'pending' && speed >= 5) {
+          console.log(`[Towing] Avbruten - hastighet >= 5km/h under väntetiden`);
+          clearAlertState(topic, 'towing');
         }
       }, ALERT_DELAY_MS);
     } else if (towingState.status === 'pending') {
+      // Kontinuerlig övervaking under väntetiden
+      const currentBatteryVoltage = reported['66'] ? reported['66'] / 1000 : 0;
+      
+      // Om tändningen slås PÅ -> avbryt larm
       if (ignitionOn) {
-        console.log(`[Event] Bogsering avbruten - tändning på.`);
+        console.log(`[Event] Bogsering avbruten - tändning på`);
         clearAlertState(topic, 'towing');
-      } else {
-        // Kontrollera om den flyttats mer än 100m
-        const R = 6371e3; // meter
-        const φ1 = towingState.startPos.lat * Math.PI/180;
-        const φ2 = lat * Math.PI/180;
-        const Δφ = (lat - towingState.startPos.lat) * Math.PI/180;
-        const Δλ = (lng - towingState.startPos.lng) * Math.PI/180;
-        const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ/2) * Math.sin(Δλ/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-        const distance = R * c;
-
-        if (distance > 100) {
-            console.log(`[Event] Bogsering avstånd > 100m, triggar larm.`);
-            triggerAlert('towing', topic, reported, data);
-        }
+      } 
+      // Om hastighet > 5km/h -> avbryt (motor igång eller i rörelse)
+      else if (speed > 5) {
+        console.log(`[Event] Bogsering avbruten - hastighet ${speed}km/h`);
+        clearAlertState(topic, 'towing');
+      }
+      // Om batterispänningen ökar markant (>13.2V) -> tändning på eller laddare ansluten
+      else if (currentBatteryVoltage > 13.2 && towingState.batteryVoltageAtStart < 13.0) {
+        console.log(`[Towing] Spänning ökade från ${towingState.batteryVoltageAtStart.toFixed(2)}V till ${currentBatteryVoltage.toFixed(2)}V - tändning på`);
+        clearAlertState(topic, 'towing');
       }
     }
     // --- Slut på händelsedetektering ---
